@@ -1,0 +1,1 @@
+valgrind --tool=memcheck --leak-check=full --error-exitcode=1 --track-origins=yes -s --leak-check=full --show-leak-kinds=all ./d -i
