@@ -750,46 +750,52 @@ int Daemon(void) {
                             }
                             else if (sscanf(command, "answer %s", second_arg)) {
                                 LOG(":handler: Processing command - answer", log_fd);
-                                int cur_user = shared_memory->game.cur_user == 0 ? player1 : player2;
-                                if (cur_user != from_index) { // Not user's turn
-                                    LOG(":handler: Got not user's turn", log_fd);
-                                    snprintf(master_answer, 
-                                            sizeof(master_answer),
-                                            "It's not your turn! Please wait");
-                                    snprintf(send_to_who, sizeof(send_to_who), "One");
-                                } else { // User's turn
-                                    LOG(":handler: Got user's turn", log_fd);
-                                    if (strcmp(second_arg, shared_memory->game.word) == 0) { // Guessed
-                                        LOG("User guessed", log_fd);
-                                        shared_lock();
-                                        if (cur_user == player1) {
-                                            shared_memory->game.score_1 += shared_memory->game.cur_score;
+                                if (shared_memory->game.is_finished != -1) {
+                                    int cur_user = shared_memory->game.cur_user == 0 ? player1 : player2;
+                                    if (cur_user != from_index) { // Not user's turn
+                                        LOG(":handler: Got not user's turn", log_fd);
+                                        snprintf(master_answer, 
+                                                sizeof(master_answer),
+                                                "It's not your turn! Please wait");
+                                        snprintf(send_to_who, sizeof(send_to_who), "One");
+                                    } else { // User's turn
+                                        LOG(":handler: Got user's turn", log_fd);
+                                        if (strcmp(second_arg, shared_memory->game.word) == 0) { // Guessed
+                                            LOG("User guessed", log_fd);
+                                            shared_lock();
+                                            if (cur_user == player1) {
+                                                shared_memory->game.score_1 += shared_memory->game.cur_score;
+                                            } else {
+                                                shared_memory->game.score_2 += shared_memory->game.cur_score;
+                                            }
+                                            shared_memory->game.is_finished = 2;
+                                            shared_unlock();
+                                            snprintf(
+                                                master_answer,
+                                                sizeof(master_answer),
+                                                "Player %d guessed the word!",
+                                                cur_user == player1 ? 1 : 2
+                                            );
                                         } else {
-                                            shared_memory->game.score_2 += shared_memory->game.cur_score;
+                                            LOG("User mistaken", log_fd);
+                                            snprintf(
+                                                master_answer,
+                                                sizeof(master_answer),
+                                                "Player %d mistaken the word! Game has ended for him :(",
+                                                cur_user == player1 ? 1 : 2
+                                            );
+                                            shared_lock();
+                                            shared_memory->game.is_finished = 1;
+                                            shared_memory->game.cur_user = !shared_memory->game.cur_user;
+                                            shared_unlock();
+                                            generate_current_score(0);
                                         }
-                                        shared_memory->game.is_finished = 2;
-                                        shared_unlock();
-                                        snprintf(
-                                            master_answer,
-                                            sizeof(master_answer),
-                                            "Player %d guessed the word!",
-                                            cur_user == player1 ? 1 : 2
-                                        );
-                                    } else {
-                                        LOG("User mistaken", log_fd);
-                                        snprintf(
-                                            master_answer,
-                                            sizeof(master_answer),
-                                            "Player %d mistaken the word! Game has ended for him :(",
-                                            cur_user == player1 ? 1 : 2
-                                        );
-                                        shared_lock();
-                                        shared_memory->game.is_finished = 1;
-                                        shared_memory->game.cur_user = !shared_memory->game.cur_user;
-                                        shared_unlock();
-                                        generate_current_score(0);
+                                        snprintf(send_to_who, sizeof(send_to_who), "Both");
                                     }
-                                    snprintf(send_to_who, sizeof(send_to_who), "Both");
+                                }
+                                else {
+                                    snprintf(send_to_who, sizeof(send_to_who), "One");
+                                    snprintf(master_answer, sizeof(master_answer), "There is no game on server!");
                                 }
                             }
                             else if (sscanf(command, "start %s", second_arg)) {
@@ -814,63 +820,69 @@ int Daemon(void) {
                             }
                             else if (sscanf(command, "letter %c", &letter)) {
                                 LOG(":handler: Processing command - letter", log_fd);
-                                int cur_user = shared_memory->game.cur_user == 0 ? player1 : player2;
-                                if (cur_user != from_index) { // Not user's turn
-                                    LOG(":handler: Got not user's turn", log_fd);
-                                    snprintf(master_answer, 
-                                            sizeof(master_answer),
-                                            "It's not your turn! Please wait");
-                                    snprintf(send_to_who, sizeof(send_to_who), "One");
-                                } else { // User's turn
-                                    LOG(":handler: Got user's turn", log_fd);
-                                    int found_flag = 0, j;
-                                    char current_letter, mask;
-                                    shared_lock();
-                                    for (j = 0; j < strlen(shared_memory->game.word); ++j) {
-                                        current_letter = shared_memory->game.word[j];
-                                        mask = shared_memory->game.mask[j];
-                                        if ((current_letter == letter) & (mask == 0)) {
-                                            found_flag = 1;
-                                            shared_memory->game.mask[j] = 1;
-                                        }
-                                    }
-                                    shared_unlock();
-                                    if (found_flag) { // It s a guess and give him points
-                                        LOG("User guessed", log_fd);
+                                if (shared_memory->game.is_finished != -1) {
+                                    int cur_user = shared_memory->game.cur_user == 0 ? player1 : player2;
+                                    if (cur_user != from_index) { // Not user's turn
+                                        LOG(":handler: Got not user's turn", log_fd);
+                                        snprintf(master_answer, 
+                                                sizeof(master_answer),
+                                                "It's not your turn! Please wait");
+                                        snprintf(send_to_who, sizeof(send_to_who), "One");
+                                    } else { // User's turn
+                                        LOG(":handler: Got user's turn", log_fd);
+                                        int found_flag = 0, j;
+                                        char current_letter, mask;
                                         shared_lock();
-                                        if (cur_user == player1) {
-                                            shared_memory->game.score_1 += shared_memory->game.cur_score;
-                                        } else {
-                                            shared_memory->game.score_2 += shared_memory->game.cur_score;
+                                        for (j = 0; j < strlen(shared_memory->game.word); ++j) {
+                                            current_letter = shared_memory->game.word[j];
+                                            mask = shared_memory->game.mask[j];
+                                            if ((current_letter == letter) & (mask == 0)) {
+                                                found_flag = 1;
+                                                shared_memory->game.mask[j] = 1;
+                                            }
                                         }
                                         shared_unlock();
-                                        // Now send message
-                                        snprintf(
-                                            master_answer,
-                                            sizeof(master_answer),
-                                            "Player %d guessed! Keep up the good work!",
-                                            cur_user == player1 ? 1 : 2
-                                        );
-                                    }
-                                    else {
-                                        LOG("User mistaken", log_fd);
-                                        if (shared_memory->game.is_finished != 1) {
+                                        if (found_flag) { // It s a guess and give him points
+                                            LOG("User guessed", log_fd);
+                                            shared_lock();
+                                            if (cur_user == player1) {
+                                                shared_memory->game.score_1 += shared_memory->game.cur_score;
+                                            } else {
+                                                shared_memory->game.score_2 += shared_memory->game.cur_score;
+                                            }
+                                            shared_unlock();
+                                            // Now send message
                                             snprintf(
                                                 master_answer,
                                                 sizeof(master_answer),
-                                                "Player %d mistaken. Move changeover",
+                                                "Player %d guessed! Keep up the good work!",
                                                 cur_user == player1 ? 1 : 2
                                             );
-                                            shared_lock();
-                                            shared_memory->game.cur_user = !shared_memory->game.cur_user;
-                                            shared_unlock();
                                         }
                                         else {
-                                            snprintf(master_answer, sizeof(master_answer), "No move change");
+                                            LOG("User mistaken", log_fd);
+                                            if (shared_memory->game.is_finished != 1) {
+                                                snprintf(
+                                                    master_answer,
+                                                    sizeof(master_answer),
+                                                    "Player %d mistaken. Move changeover",
+                                                    cur_user == player1 ? 1 : 2
+                                                );
+                                                shared_lock();
+                                                shared_memory->game.cur_user = !shared_memory->game.cur_user;
+                                                shared_unlock();
+                                            }
+                                            else {
+                                                snprintf(master_answer, sizeof(master_answer), "No move change");
+                                            }
                                         }
+                                        generate_current_score(0);
+                                        snprintf(send_to_who, sizeof(send_to_who), "Both");
                                     }
-                                    generate_current_score(0);
-                                    snprintf(send_to_who, sizeof(send_to_who), "Both");
+                                }
+                                else {
+                                    snprintf(send_to_who, sizeof(send_to_who), "One");
+                                    snprintf(master_answer, sizeof(master_answer), "There is no game on server!");
                                 }
                             }
                             
