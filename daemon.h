@@ -45,6 +45,7 @@ typedef struct Game {
 	int score_1;
 	int score_2;
 	int cur_score;
+	int game_owner;
 	int is_finished;  // 0 - in progress, 1 - one player tried to use answer, 2 - finished, -1 - not started
 } Game;
 

@@ -98,6 +98,7 @@ void resetGame() {
 	shared_memory->game.score_2 = 0;
 	shared_memory->is_game_started = 0;
 	shared_memory->game.is_finished = -1;
+    shared_memory->game.game_owner = -1;
     shared_unlock();
 }
 
@@ -724,19 +725,29 @@ int Daemon(void) {
                             if (sscanf(command, "join %s", second_arg)) {
                                 LOG(":handler: Processing command - join", log_fd);
                                 if (strlen(shared_memory->game.password) != 0) { // Can join
-                                    // Check password
-                                    if (strcmp(second_arg, shared_memory->game.password) == 0) { // OK Password
-                                        LOG(":hander: Correct password got", log_fd);
-                                        snprintf(master_answer, 
-                                            sizeof(master_answer), 
-                                            "Starting game!");
-                                        snprintf(send_to_who, sizeof(send_to_who), "Both");
-                                    }
-                                    else { // Wrong password
-                                        LOG(":handler: Wrong password got", log_fd);
-                                        snprintf(master_answer, 
-                                            sizeof(master_answer), 
-                                            "Wrong password. Try again");
+                                        // Check password
+                                    if (shared_memory->game.game_owner != from_index) {
+                                        if (strcmp(second_arg, shared_memory->game.password) == 0) { // OK Password
+                                            LOG(":hander: Correct password got", log_fd);
+                                            snprintf(master_answer, 
+                                                sizeof(master_answer), 
+                                                "Starting game!");
+                                            snprintf(send_to_who, sizeof(send_to_who), "Both");
+                                        }
+                                        else { // Wrong password
+                                            LOG(":handler: Wrong password got", log_fd);
+                                            snprintf(master_answer, 
+                                                sizeof(master_answer), 
+                                                "Wrong password. Try again");
+                                            snprintf(send_to_who, sizeof(send_to_who), "One");
+                                        }
+                                    } else {
+                                        LOG("Try to join his own game", log_fd);
+                                        snprintf(
+                                            master_answer,
+                                            sizeof(master_answer),
+                                            "Can't join your own game!"
+                                        );
                                         snprintf(send_to_who, sizeof(send_to_who), "One");
                                     }
                                 }   
@@ -795,7 +806,7 @@ int Daemon(void) {
                                 }
                                 else {
                                     snprintf(send_to_who, sizeof(send_to_who), "One");
-                                    snprintf(master_answer, sizeof(master_answer), "There is no game on server!");
+                                    snprintf(master_answer, sizeof(master_answer), "There is no started game on server!");
                                 }
                             }
                             else if (sscanf(command, "start %s", second_arg)) {
@@ -809,6 +820,7 @@ int Daemon(void) {
                                 else { // No game -> creating
                                     shared_lock();
                                     strcpy(shared_memory->game.password, second_arg);
+                                    shared_memory->game.game_owner = from_index;
                                     shared_unlock();
                                     LOG(":handler: Creating a new game with password", log_fd);
                                     LOG(second_arg, log_fd);
@@ -882,7 +894,7 @@ int Daemon(void) {
                                 }
                                 else {
                                     snprintf(send_to_who, sizeof(send_to_who), "One");
-                                    snprintf(master_answer, sizeof(master_answer), "There is no game on server!");
+                                    snprintf(master_answer, sizeof(master_answer), "There is no started game on server!");
                                 }
                             }
                             

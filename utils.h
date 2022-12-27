@@ -64,6 +64,7 @@ int str2int(const char* str, int* result) {
 char* read_msg_from_msgq(int msgqid, long type)
 {
     int buflen = 200;
+    int rcv_res;
     char* buf = (char*)calloc(sizeof(long) + buflen, sizeof(char));
     if (!buf) {
         perror("Not enough memory");
@@ -71,7 +72,7 @@ char* read_msg_from_msgq(int msgqid, long type)
     }
     for (;;) {
         errno = 0;
-        int rcv_res = msgrcv(msgqid, buf, buflen, type, IPC_NOWAIT);
+        rcv_res = msgrcv(msgqid, buf, buflen, type, IPC_NOWAIT);
         if (rcv_res > -1) {
             break;
         }
@@ -91,6 +92,7 @@ char* read_msg_from_msgq(int msgqid, long type)
             return NULL;
         }
     }
+    buf[rcv_res] = '\0';
     return buf;
 }
 
