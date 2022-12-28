@@ -8,7 +8,7 @@ daemonConfiguration config = { 0 };
 
 // File descriptors
 int socket_fd = -1;
-int msgqid = -1;
+static int msgqid = -1;
 int log_fd = -1;
 
 // PIDs
@@ -267,12 +267,14 @@ int setUpConfig() {
     err = updateConfig(action, port, log_file);
     free(log_file);
     char pattern[] = "My PID: %d";
-    char result[20];
+    char result[20] = {0};
     sprintf(
         result,
         pattern,
         getpid()
     );
+    LOG(result, log_fd);
+    sprintf(result, "MSQGQUID - %d", msgqid);
     LOG(result, log_fd);
 
     return err;
@@ -297,7 +299,14 @@ void sigChild(int sig) {
 
 void sigHup(int sig) {
 	LOG("Got signal to update config", log_fd);
-	setUpConfig();
+    if (shared_memory->game.is_finished == -1) {
+        setUpConfig();
+        resetGame();
+    }
+    else {
+        LOG("Got sighup, but there is game in progress", log_fd);
+        return ;
+    }
 	LOG("Config was updated", log_fd);
 	return ;
 }
@@ -610,10 +619,16 @@ int Daemon(void) {
                         LOG(buf, log_fd);
                         pid_t pid, pid_2, pid_3;
 
-                        send_msg_to_msgq(buf, msgqid, msgqid, 1);
+                        int status_send = send_msg_to_msgq(buf, msgqid, msgqid, 1);
+                        if (status_send == -1) {
+                            send(i, "Server error. Try again!", 25, 0);
+                        }
                         sighup_lock();
                         if ((pid = fork()) == 0) {
                             char *command = get_msg_from_msgq(msgqid, 1);
+                            if (!command) {
+                                exit(1);
+                            }
                             char second_arg[MAXLINE] = {0};
                             char letter;
                             int failed = 0;
@@ -694,7 +709,6 @@ int Daemon(void) {
 
                         LOG("Worker answer:", log_fd);
                         LOG(worker_answer, log_fd);
-                        
                         if (strncmp(worker_answer, "Sorry", 5) == 0) {
                             send(i, worker_answer, strlen(worker_answer), 0);
                             LOG("Send answer to player", log_fd);
@@ -703,10 +717,8 @@ int Daemon(void) {
                         }
                         free(worker_answer);
                         // Command processing
-                        
                         char player_index[20] = {0};
                         sprintf(player_index, "%d", i);
-
                         send_msg_to_msgq(buf, msgqid, msgqid, 3);
                         send_msg_to_msgq(player_index, msgqid, msgqid, 31);
                         
@@ -714,6 +726,9 @@ int Daemon(void) {
                         if ((pid = fork()) == 0) {
                             memset(master_answer, 0, sizeof(master_answer));
                             char *command = get_msg_from_msgq(msgqid, 3);
+                            if (!command) {
+                                exit(1);
+                            }
                             char *from_fd = get_msg_from_msgq(msgqid, 31);
                             int from_index;
                             str2int(from_fd, &from_index);
@@ -724,40 +739,46 @@ int Daemon(void) {
                             char letter;
                             if (sscanf(command, "join %s", second_arg)) {
                                 LOG(":handler: Processing command - join", log_fd);
-                                if (strlen(shared_memory->game.password) != 0) { // Can join
-                                        // Check password
-                                    if (shared_memory->game.game_owner != from_index) {
-                                        if (strcmp(second_arg, shared_memory->game.password) == 0) { // OK Password
-                                            LOG(":hander: Correct password got", log_fd);
-                                            snprintf(master_answer, 
-                                                sizeof(master_answer), 
-                                                "Starting game!");
-                                            snprintf(send_to_who, sizeof(send_to_who), "Both");
-                                        }
-                                        else { // Wrong password
-                                            LOG(":handler: Wrong password got", log_fd);
-                                            snprintf(master_answer, 
-                                                sizeof(master_answer), 
-                                                "Wrong password. Try again");
+                                if (shared_memory->game.is_finished == -1) {
+                                    if (strlen(shared_memory->game.password) != 0) { // Can join
+                                            // Check password
+                                        if (shared_memory->game.game_owner != from_index) {
+                                            if (strcmp(second_arg, shared_memory->game.password) == 0) { // OK Password
+                                                LOG(":hander: Correct password got", log_fd);
+                                                snprintf(master_answer, 
+                                                    sizeof(master_answer), 
+                                                    "Starting game!");
+                                                snprintf(send_to_who, sizeof(send_to_who), "Both");
+                                            }
+                                            else { // Wrong password
+                                                LOG(":handler: Wrong password got", log_fd);
+                                                snprintf(master_answer, 
+                                                    sizeof(master_answer), 
+                                                    "Wrong password. Try again");
+                                                snprintf(send_to_who, sizeof(send_to_who), "One");
+                                            }
+                                        } else {
+                                            LOG("Try to join his own game", log_fd);
+                                            snprintf(
+                                                master_answer,
+                                                sizeof(master_answer),
+                                                "Can't join your own game!"
+                                            );
                                             snprintf(send_to_who, sizeof(send_to_who), "One");
                                         }
-                                    } else {
-                                        LOG("Try to join his own game", log_fd);
-                                        snprintf(
-                                            master_answer,
-                                            sizeof(master_answer),
-                                            "Can't join your own game!"
-                                        );
+                                    }   
+                                    else { // No game to join
+                                        LOG(":handler: No available game", log_fd);
+                                        snprintf(master_answer, 
+                                                sizeof(master_answer), 
+                                                "No available games on server. You can create your game using start {password}");
                                         snprintf(send_to_who, sizeof(send_to_who), "One");
-                                    }
-                                }   
-                                else { // No game to join
-                                    LOG(":handler: No available game", log_fd);
-                                    snprintf(master_answer, 
-                                            sizeof(master_answer), 
-                                            "No available games on server. You can create your game using start {password}");
+                                    }         
+                                }
+                                else {
+                                    snprintf(master_answer, sizeof(master_answer), "You are already in the game!");
                                     snprintf(send_to_who, sizeof(send_to_who), "One");
-                                }                             
+                                }                    
                             }
                             else if (sscanf(command, "answer %s", second_arg)) {
                                 LOG(":handler: Processing command - answer", log_fd);
@@ -924,7 +945,6 @@ int Daemon(void) {
                         LOG(handler_answer, log_fd);
                         LOG("Sending to:", log_fd);
                         LOG(send_to, log_fd);
-
                         if (strncmp(handler_answer, "Starting game", 10) == 0) {
                             if ((pid = fork()) == 0) {
                                 generate_word_for_game();
@@ -942,12 +962,15 @@ int Daemon(void) {
                             send(player2, handler_answer, strlen(handler_answer), 0);
                             LOG("Send to both players", log_fd);
                             if ((shared_memory->game.is_finished == 0) || (shared_memory->game.is_finished == 1)) {
+                                if ((shared_memory->game.cur_score == 0) && (shared_memory->game.is_finished == 1)) {
+                                    generate_current_score(1);
+                                }
                                 char *question = get_question_with_masked_answer();
                                 if (question) {
                                     send(player1, question, strlen(question), 0);
                                     send(player2, question, strlen(question), 0);
                                     free(question);
-                                    if (shared_memory->game.cur_score == 0) {
+                                    if ((shared_memory->game.cur_score == 0) && (shared_memory->game.is_finished != 1)){
                                         LOG("User got bankroted", log_fd);
                                         generate_current_score(1);
                                         shared_lock();
